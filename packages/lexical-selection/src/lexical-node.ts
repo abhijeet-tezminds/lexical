@@ -5,11 +5,14 @@
  * LICENSE file in the root directory of this source tree.
  *
  */
+
+import {$isListItemNode, ListItemNode} from '@lexical/list';
 import {
   $createTextNode,
   $getCharacterOffsets,
   $getNodeByKey,
   $getPreviousSelection,
+  $getSelection,
   $isElementNode,
   $isRangeSelection,
   $isRootNode,
@@ -240,7 +243,7 @@ export function $addNodeStyle(node: TextNode): void {
 }
 
 function $patchStyle(
-  target: TextNode | RangeSelection,
+  target: TextNode | ListItemNode | RangeSelection,
   patch: Record<
     string,
     | string
@@ -288,22 +291,29 @@ export function $patchStyleText(
       ) => string)
   >,
 ): void {
-  const selectedNodes = selection.getNodes();
-  const selectedNodesLength = selectedNodes.length;
-  const anchorAndFocus = selection.getStartEndPoints();
-  if (anchorAndFocus === null) {
+  if (selection.isCollapsed() && $isRangeSelection(selection)) {
+    $patchStyle(selection, patch);
+  } else {
+    $forEachSelectedTextNode((textNode) => {
+      $patchStyle(textNode, patch);
+    });
+  }
+}
+
+export function $forEachSelectedTextNode(
+  fn: (textNode: TextNode) => void,
+): void {
+  const selection = $getSelection();
+  if (!$isRangeSelection(selection)) {
     return;
   }
-  const [anchor, focus] = anchorAndFocus;
+  const selectedNodes = selection.getNodes();
+  const selectedNodesLength = selectedNodes.length;
+  const {anchor, focus} = selection;
 
   const lastIndex = selectedNodesLength - 1;
   let firstNode = selectedNodes[0];
   let lastNode = selectedNodes[lastIndex];
-
-  if (selection.isCollapsed() && $isRangeSelection(selection)) {
-    $patchStyle(selection, patch);
-    return;
-  }
 
   const firstNodeText = firstNode.getTextContent();
   const firstNodeTextLength = firstNodeText.length;
@@ -355,14 +365,14 @@ export function $patchStyleText(
         $isTokenOrSegmented(firstNode) ||
         (startOffset === 0 && endOffset === firstNodeTextLength)
       ) {
-        $patchStyle(firstNode, patch);
+        fn(firstNode);
         firstNode.select(startOffset, endOffset);
       } else {
         // The node is partially selected, so split it into two nodes
         // and style the selected one.
         const splitNodes = firstNode.splitText(startOffset, endOffset);
         const replacement = startOffset === 0 ? splitNodes[0] : splitNodes[1];
-        $patchStyle(replacement, patch);
+        fn(replacement);
         replacement.select(0, endOffset - startOffset);
       }
     } // multiple nodes selected.
@@ -383,7 +393,7 @@ export function $patchStyleText(
         }
       }
 
-      $patchStyle(firstNode as TextNode, patch);
+      fn(firstNode as TextNode);
     }
 
     if ($isTextNode(lastNode) && lastNode.canHaveFormat()) {
@@ -404,7 +414,7 @@ export function $patchStyleText(
       }
 
       if (endOffset !== 0 || endType === 'element') {
-        $patchStyle(lastNode as TextNode, patch);
+        fn(lastNode as TextNode);
       }
     }
 
@@ -420,8 +430,40 @@ export function $patchStyleText(
         selectedNodeKey !== lastNode.getKey() &&
         !selectedNode.isToken()
       ) {
-        $patchStyle(selectedNode, patch);
+        fn(selectedNode as TextNode);
       }
+    }
+  }
+
+  let selectedNodesTextLength = 0;
+  let isListSelected = false;
+  // style the list items
+  for (let i = 0; i < selectedNodes.length; i++) {
+    const selectedNode = selectedNodes[i];
+    // No actual text is selected, so do nothing.
+    if (startOffset === endOffset) {
+      return;
+    }
+    if ($isListItemNode(selectedNode)) {
+      $patchStyle(selectedNode, patch);
+      isListSelected = true;
+    }
+    selectedNodesTextLength += selectedNode.getTextContentSize();
+  }
+
+  const listNode = firstNode.getParent();
+
+  if ($isListItemNode(listNode)) {
+    // No actual text is selected, so do nothing.
+    if (startOffset === endOffset) {
+      return;
+    }
+
+    if (
+      !isListSelected &&
+      listNode.getTextContentSize() === selectedNodesTextLength
+    ) {
+      $patchStyle(listNode, patch);
     }
   }
 }

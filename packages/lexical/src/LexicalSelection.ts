@@ -1165,8 +1165,12 @@ export class RangeSelection implements BaseSelection {
       lastNode.spliceText(0, lastPoint.offset, '');
       lastNode = fixText(lastNode, lastPoint.offset) || lastNode;
     }
-    if (firstNode.isAttached() && $isTextNode(firstNode)) {
-      firstNode.selectEnd();
+    if (
+      firstNode.isAttached() &&
+      lastBlock &&
+      lastBlock.getType() === 'listitem'
+    ) {
+      lastNode.selectStart();
     } else if (lastNode.isAttached() && $isTextNode(lastNode)) {
       lastNode.selectStart();
     }
@@ -1174,12 +1178,25 @@ export class RangeSelection implements BaseSelection {
     // Merge blocks
     const bothElem = $isElementNode(firstBlock) && $isElementNode(lastBlock);
     if (bothElem && firstBlock !== lastBlock) {
-      firstBlock.append(...lastBlock.getChildren());
+      if (lastBlock.getType() === 'listitem') {
+        const paragraph = $createParagraphNode();
+        const children = lastBlock.getChildren();
+        children.forEach((child) => paragraph.append(child));
+        paragraph.setStyle(lastBlock.getStyle());
+        firstBlock.insertAfter(paragraph);
+        if (!lastNode.getTextContentSize()) {
+          paragraph.selectStart();
+        }
+      } else {
+        firstBlock.append(...lastBlock.getChildren());
+      }
+
       lastBlock.remove();
       lastPoint.set(firstPoint.key, firstPoint.offset, firstPoint.type);
     }
   }
 
+  // TO-DO: Migrate this method to the new utility function $forEachSelectedTextNode (share similar logic)
   /**
    * Applies the provided format to the TextNodes in the Selection, splitting or
    * merging nodes as necessary.
